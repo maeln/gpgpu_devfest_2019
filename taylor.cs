@@ -1,5 +1,7 @@
 #version 450
 
+#define BRANCH
+
 layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 
 layout(std430, set = 0, binding = 0) buffer ToSin { float tosin[]; };
@@ -32,5 +34,15 @@ float taylor_sin(float x, int iter) {
 void main() {
   uint idx = gl_GlobalInvocationID.x;
   float data = tosin[idx];
+#ifndef BRANCH
   tosin[idx] = taylor_sin(data, 32);
+#else
+  if(data < 0.2) {
+    tosin[idx] = taylor_sin(data, 8);
+  } else if (data < 0.5) {
+    tosin[idx] = taylor_sin(data, 16);
+  } else {
+    tosin[idx] = taylor_sin(data, 32);
+  }
+#endif
 }
