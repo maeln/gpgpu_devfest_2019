@@ -1,0 +1,141 @@
+<html>
+
+<head>
+    <link rel="stylesheet" href="modest.css">
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+</head>
+
+<body>
+    <h1 id="demo1double">Demo 1 - double</h1>
+    <h2 id="init">Init</h2>
+    <p>En premier lieux, créer le projet rust:</p>
+    <pre><code>cargo new double
+</code></pre>
+    <p>Cargo.toml:</p>
+    <pre><code>[workspace]
+members = [
+    "double",
+]
+</code></pre>
+    <p>Dans les dépendances du projet, rajouter wyzoid:</p>
+    <pre><code>wyzoid = "0.1.2"
+</code></pre>
+    <h2 id="shader">Shader</h2>
+    <p>Avant de créer notre premier shader, on va lancer notre compiler de shader:</p>
+    <pre><code>shdrr -v
+</code></pre>
+    <p><code>shdrr</code> va compiler automatiquement nos fichiers GLSL en SPIR-V, qui est un bytecode standard de
+        shader
+        supporté par Vulkan, OpenGL et OpenCL.</p>
+    <p>On peut maintenant commencer notre shader. On doit d'abord préciser la version de GLSL à utiliser:</p>
+    <pre><code>#version 450
+</code></pre>
+    <p>On utilise la version 450 car c'est la version minimum pour être compatible avec vulkan.
+        On va ensuite définir un espace d'éxécution pour notre shader en 3 dimensions:</p>
+    <pre><code>[snippet:layout]
+layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
+</code></pre>
+    <p>J'éxpliquerais un peu plus tard à quoi il correspond, mais en mettant toute nos dimensions à 1, on définit que
+        notre
+        shader s'éxécute unitairement.</p>
+    <p>La deuxième chose c'est de donner la définition de notre buffer, c'est à dire un espace mémoire dans la carte
+        graphique dans laquelle on a mis nos donnée:</p>
+    <pre><code>[snippet:buffer]
+layout(std430, set = 0, binding = 0) buffer Data { float data[]; };
+</code></pre>
+    <p>On accèder à plusieurs buffer dans un shader, donc on doit définir lequel on veut via un numéro de set et de
+        binding.
+        Ici on indique qu'on veut celui attacher au set 0 et au binding 0.</p>
+    <p>On écrit enfin le coeur de notre fonction:</p>
+    <pre><code>void main() {
+  uint i = gl_GlobalInvocationID.x;
+  data[i] *= 2.0;
+}
+</code></pre>
+    <p>La première chose à faire est de récupèrer l'identifiant unique d'éxécution du shader, qui est l'équivalent de
+        notre
+        variable d'itération <code>i</code>, <code>n</code> … si on était séquentiel.</p>
+    <p>On récupère notre donnée associé et on la multiplie par deux.</p>
+    <p>Voila, notre shader est prêt.</p>
+    <p>[vérifier que shdrr a correctement compilé]</p>
+    <h2 id="partieclient">Partie client</h2>
+    <p>On peut maintenant faire le code rust qui va s'occuper d'envoyer nos donnée et notre shader sur le gpu, executé
+        le
+        tout et récupèrer la sortie.</p>
+    <p>En premier lieux, on va indiquer que l'on utilise wyzoid, générer un tableau de nombre aléatoire [0,1] et créer
+        le
+        chemin vers notre shader:</p>
+    <pre><code>extern crate wyzoid;
+
+const VALUES: usize = 64;
+
+[...]
+let input = wyzoid::utils::rand_vec::&lt;f32&gt;(VALUES, 0.0, 1.0);
+let shader = std::path::PathBuf::from("double.cs.spirv");
+</code></pre>
+    <p>Ensuite, on va utiliser notre API pour définir ce que l'on veut éxécuter sur notre GPU:</p>
+    <pre><code>let job = wyzoid::high::job::JobBuilder::new()
+        .add_buffer(&amp;input, 0, 0)
+        .add_shader(&amp;shader)
+        .add_dispatch((VALUES as u32, 1, 1))
+        .build();
+</code></pre>
+    <p>On définit que l'on veut mettre nos donnée dans le buffer qui est dans le set 0, binding 0, comme indiqué dans
+        notre
+        shader.
+        On passe notre shader et enfin, on défini comment on éxécute notre shader.</p>
+    <p>On a définis plus tôt que on éxécutait notre shader unitairement, c'est à dire, on veut que 1 exécution = 1
+        donnée.
+        Donc, ici, on veut que notre dimention x (car c'est celle que l'on a utiliser pour l'identifiant) soit
+        éxactement
+        égale au nombre de donnée à traiter.</p>
+    <p>On éxécute ensuite notre shader et on affiche le temps que l'on a mis:</p>
+    <pre><code>let (res, timing) = job.execute();
+println!("gpu exe: {}", timing);
+</code></pre>
+    <p>A noté que l'éxécution est non-bloquante, mais mon petit framework est bloquant pour simplifier les choses.</p>
+    <p>Ensuite, on veut quand même vérifier que nos données de sorties sont correcte, et on peut en profiter pour
+        comparer
+        la vitesse du CPU et du GPU:</p>
+    <pre><code>[snippet:copyvec]
+let s = Instant::now();
+let mut test: Vec&lt;f32&gt; = Vec::with_capacity(input.len());
+for v in &amp;input {
+    test.push(double(v.clone()));
+}
+println!("cpu exe: {}ms", wyzoid::utils::get_fract_s(s.elapsed()));
+
+[snippet:compvec]
+for i in 0..input.len() {
+    if res[0][i] != test[i] {
+        println!("ERROR");
+    }
+}
+</code></pre>
+    <p>Voila, on peut exécuter notre premier programme GPGPU:</p>
+    <pre><code>cargo run -p double
+</code></pre>
+    <p>… Et on constate que l'on est beaucoup moins rapide que le CPU.
+        Alors que faire.</p>
+    <p>La première chose, si on éxécute une deuxième fois, on vois que le temps "shader" est beaucoup moins long.
+        En fait, le driver de notre GPU doit re-compiler notre shader en quelque chose que le GPU comprend.
+        La plus part des driver vont mettre en cache ce résultat et on économise donc du temps.
+        Qui plus est, on n'a qu'a faire la compilation et l'initialization que une fois dans notre application.
+        Donc a moins de faire des one-shot comme dans cette démo, on devrais pouvoir ignorer ce temps.</p>
+    <p>On fait un aller retour entre RAM et VRAM, pour 64 donnée ce n'est pas la peine.</p>
+    <pre><code>const VALUES: usize = 1024 * 1024;
+</code></pre>
+    <p>Enfin, on sous utilise largement notre GPU puisque l'on est entrain d'éxécuter unitairement notre shader.</p>
+    <p>Retournous sur le layout dont on parlais plus tôt et disons que l'on s'éxécute sur 8 données à la fois:</p>
+    <pre><code>layout(local_size_x = 8, local_size_y = 1, local_size_z = 1) in;
+</code></pre>
+    <p>Sur notre code client, il faut donc diviser notre nombre d'éxécution par 8:</p>
+    <pre><code>.add_dispatch((VALUES as u32 / 8, 1, 1))
+</code></pre>
+    <p>On voit que l'on a gagné beaucoup de performance. Essayons maintenant avec 64, 128 voir 512 données.</p>
+    <p>On ne gagne aucune performance, voir on en perd, pourquoi ?</p>
+    <p>[retour slide]</p>
+</body>
+
+</html>

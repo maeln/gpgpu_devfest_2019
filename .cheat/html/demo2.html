@@ -1,0 +1,104 @@
+<html>
+
+<head>
+  <link rel="stylesheet" href="modest.css">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+</head>
+
+<body>
+  <h1 id="demo2sin">Demo 2 - sin</h1>
+  <h2 id="init">Init</h2>
+  <p>Pareille</p>
+  <pre><code>cargo new taylor
+</code></pre>
+  <pre><code>[workspace]
+members = [
+    "double",
+    "taylor",
+]
+</code></pre>
+  <p>et on copie-colle notre code précédent. On crée un shader <code>taylor.cs</code>.</p>
+  <h2 id="leshader">Le shader</h2>
+  <p>En premier lieux, on va avoir besoin de définir quelques fonctions dont on a besoin:</p>
+  <pre><code>[snippet:mpow]
+float mpow(float a, int b) {
+  float acc = 1.0;
+  for (int i = 0; i &lt; b; ++i) {
+    acc *= a;
+  }
+  return acc;
+}
+</code></pre>
+  <p>On redéfinit une fonction d'exponentiation car celle de GLSL est indéfinit si a est inférieur a 0.
+    On a aussi besoin d'une fonction factoriel.</p>
+  <pre><code>[snippet:fact]
+float fact(float x) {
+  float acc = 1.0;
+  for (float i = 1.0; i &lt;= x; i += 1.0) {
+    acc = acc * i;
+  }
+  return acc;
+}
+</code></pre>
+  <p>On peut maintenant coder notre fonction taylor:</p>
+  <pre><code>float taylor_sin(float a, int iter) {
+  float acc = 0.0;
+  for (int i = 0; i &lt; iter; ++i) {
+    float n = float(i);
+    [snippet:taylor]
+    acc += (mpow(-1.0, i) * pow(a, 2.0 * n + 1.0)) / fact(2.0 * n + 1.0);
+  }
+  return acc;
+}
+</code></pre>
+  <p>On peu désormais écrire notre fonction main:</p>
+  <pre><code>void main() {
+  uint idx = gl_GlobalInvocationID.x;
+  float data = tosin[idx];
+  tosin[idx] = taylor_sin(data, 32);
+}
+</code></pre>
+  <h2 id="client">Client</h2>
+  <p>Il nous faut mettre à jour le liens vers notre shader:</p>
+  <pre><code>let shader = std::path::PathBuf::from("taylor.cs.spirv");
+</code></pre>
+  <p>On doit mettre a jour notre copie du tableau aussi:</p>
+  <pre><code>for v in &amp;input {
+    test.push(f32::sin(v.clone()));
+}
+</code></pre>
+  <p>On doit aussi changer notre comparaison car on compare des flottants:</p>
+  <pre><code>if !wyzoid::utils::f32_cmp(res[0][i], test[i], 0.001) {
+    println!("ERROR");
+}
+</code></pre>
+  <p>On peut désormais lancer notre projet:</p>
+  <pre><code>cargo run -p taylor
+</code></pre>
+  <h2 id="branching">Branching</h2>
+  <p>Un ami mathematicien ma signaler que cette série de taylor convergeais plus rapidement si notre valeur d'entrée
+    etait proche de 0.
+    Je vais donc essayer de faire du early-exit pour nous éviter des iterations inutiles.</p>
+  <pre><code>#define BRANCH
+
+...
+
+#ifndef BRANCH
+  tosin[idx] = taylor_sin(data, 32);
+#else
+  if(data &lt; 0.2) {
+    tosin[idx] = taylor_sin(data, 8);
+  } else if (data &lt; 0.5) {
+    tosin[idx] = taylor_sin(data, 16);
+  } else {
+    tosin[idx] = taylor_sin(data, 32);
+  }
+#endif
+</code></pre>
+  <p>On lance le projet et … on gagne pas de performance ! Pire, on semble en perdre.
+    Que ce passe t'il ?</p>
+  <p>[retour slide]</p>
+</body>
+
+</html>
